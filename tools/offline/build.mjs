@@ -36,7 +36,7 @@ const GA_START = '<!-- ga:start', GA_END = '<!-- ga:end -->';
 must(GA_START, ' GA 片段的起始标记');
 must(GA_END, ' GA 片段的结束标记');
 html = html.slice(0, html.indexOf(GA_START)) + html.slice(html.indexOf(GA_END) + GA_END.length);
-// 只查外连域名：主脚本里的 track() 带 typeof 守卫，没有 gtag 也能跑，不算残留
+// 只查外连域名，确保标记外没有遗漏的统计请求
 if (/googletagmanager|google-analytics/.test(html)) throw new Error('剥掉标记之间的内容后仍有统计域名残留，离线版会往外发请求');
 
 // 相对链接在本地打开时是死的，改成线上地址

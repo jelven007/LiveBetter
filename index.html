@@ -320,14 +320,7 @@ abbr.term:hover{border-bottom-color:var(--brand-1);color:var(--brand-1)}
 </style>
 
 <!-- ga:start 这两行注释是离线构建的剥离标记（tools/offline/build.mjs），别删 -->
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-NTPGXCLMP6"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-NTPGXCLMP6');
-</script>
+<!-- 不加载第三方统计脚本，避免搜索词和带筛选条件的地址泄露 -->
 <!-- ga:end -->
 </head>
 <body>
@@ -1130,16 +1123,6 @@ function apply(){
 }
 
 /* ---------- 事件 ---------- */
-// 离线单文件会把 GA 片段整段剥掉，这里没有 gtag 也要能跑
-const track = (name, params) => { if (typeof gtag === 'function') gtag('event', name, params); };
-// 搜索词上报：搜了没命中的词就是该补的条目。results 要在 GA 后台注册成自定义指标才看得到。
-let SENT_Q = '';
-function reportSearch(){
-  const q = state.q;
-  if (q.length < 2 || q === SENT_Q) return;
-  SENT_Q = q;
-  track('search', { search_term: q, results: Number(document.getElementById('cnt').textContent) || 0 });
-}
 function wire(){
   const sb = document.getElementById('sidebar'), bd = document.getElementById('backdrop'), mb = document.getElementById('menu');
   const setMenu = (on) => { sb.classList.toggle('open', on); bd.classList.toggle('on', on); mb.setAttribute('aria-expanded', String(on)); };
@@ -1171,10 +1154,8 @@ function wire(){
   });
   document.getElementById('f-dispute').addEventListener('change', e => { state.dispute = e.target.checked; apply(); toTop(); });
   document.getElementById('f-todo').addEventListener('change', e => { state.todo = e.target.checked; apply(); toTop(); });
-  // 上报比筛选晚得多：按 120ms 那一拍发，「高血压」会被当成「高」「高血」「高血压」三次搜索
-  let tm, qtm; document.getElementById('q').addEventListener('input', e => {
+  let tm; document.getElementById('q').addEventListener('input', e => {
     clearTimeout(tm); tm = setTimeout(() => { state.q = e.target.value.trim(); apply(); }, 120);
-    clearTimeout(qtm); qtm = setTimeout(reportSearch, 2000);
   });
   const reset = () => { state.q=''; for (const d of DIMS) state[d].clear(); state.dispute=false; state.todo=false; apply(); toTop(); };
   document.getElementById('reset').addEventListener('click', reset);
@@ -1395,7 +1376,6 @@ async function dmOpen(path, from){
     DM.toc.appendChild(a);
   }
   dmSpy();
-  if (window.gtag) gtag('event', 'doc_open', { doc: path });
 }
 document.addEventListener('click', ev => {
   const a = ev.target.closest?.('a[href]');
@@ -1428,7 +1408,6 @@ function tipClose(){
 document.getElementById('tip-open').addEventListener('click', () => {
   TIP.hidden = false;
   document.getElementById('tip-x').focus();
-  if (window.gtag) gtag('event', 'tip_open');
 });
 document.getElementById('tip-x').addEventListener('click', tipClose);
 TIP.addEventListener('click', ev => { if (ev.target === TIP) tipClose(); });

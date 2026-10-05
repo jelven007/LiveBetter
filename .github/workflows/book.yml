@@ -41,8 +41,7 @@ env:
   TYPST_VERSION: '0.15.1'
 
 jobs:
-  # 交叉引用检查。单独一个 job，不挂在 build 里：锚点没补好不该连累 EPUB、PDF 和
-  # 离线单文件的发布，那是两回事。PR 上照样红，main 上该发的还是发出去。
+  # 三项检查分别运行；build 依赖它们，任一失败都不生成或发布电子书。
   # 本地那条链路（sync-stats.mjs）要记得跑才会跑，
   # 外部 PR 更是完全跑不到，所以这道检查得在 CI 里有一份。零依赖，几秒钟。
   refs:
@@ -55,7 +54,7 @@ jobs:
           node-version: 22
       - run: node tools/check-refs.mjs --check
 
-  # 说人话检查：长度、研究行话、抽象说法。理由同上，单独一个 job，不挡发布。
+  # 说人话检查：长度、研究行话、抽象说法。
   plain:
     name: 说人话检查
     runs-on: ubuntu-latest
@@ -67,7 +66,7 @@ jobs:
       - run: node tools/check-plain.mjs
 
   # 统计数字检查：README、index.html、og.html 里的条目数、A/B/C 数、链接数等是否和 book/ 对得上。
-  # 本地 sync-stats.mjs 要记得跑才会更新，网页上直接合并的 PR 完全经过不了它。理由同上，不挡发布。
+  # 本地 sync-stats.mjs 要记得跑才会更新，网页上直接合并的 PR 完全经过不了它。
   # 只查不改：让 CI 往 main 推提交会和本地分叉，而且 Ubuntu 没有微软雅黑，og.png 截不对。
   stats:
     name: 统计数字检查
@@ -80,6 +79,7 @@ jobs:
       - run: node tools/sync-stats.mjs --check
 
   build:
+    needs: [refs, plain, stats]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
