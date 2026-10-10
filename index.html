@@ -433,7 +433,7 @@ abbr.term:hover{border-bottom-color:var(--brand-1);color:var(--brand-1)}
     <a class="title" href="./"><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 12.5l4 4 8-9.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span>高性价比人生指南</span></a>
     <label class="search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5" stroke-linecap="round"/></svg>
-      <input id="q" type="search" placeholder="搜索问题、动作或处境" autocomplete="off" aria-label="搜索问题、动作或处境">
+      <input id="q" type="search" placeholder="搜索问题、动作或处境" autocomplete="off" enterkeyhint="search" aria-label="搜索问题、动作或处境">
       <kbd>/</kbd>
     </label>
     <div class="nav-r">
@@ -978,8 +978,7 @@ function gotoItem(key, fromId){
   const el = document.getElementById(id);
   if (!el) return;
   if (!el.offsetParent){            // 目标被筛选藏起来了，先把筛选清掉再跳
-    state.q = ''; for (const d of DIMS) state[d].clear();
-    syncControls(); apply(); writeUrl();
+    clearState(); apply();
   }
   // 把「从哪跳的」写进当前这条历史记录，再推一条新的，这样浏览器后退键和鼠标侧键
   // 能回到原处。记的是来源卡片的 id 而不只是滚动条位置——往回走时沿途卡片会被补
@@ -1162,13 +1161,20 @@ function readUrl(){
   for (const d of DIMS) state[d] = new Set((p.get(d)||'').split(',').filter(Boolean));
   state.dispute = p.get('dispute') === '1'; state.todo = p.get('todo') === '1';
 }
-function writeUrl(){
+function writeUrl({ preserveHash = false } = {}){
   const p = new URLSearchParams();
   if (state.q) p.set('q', state.q);
   for (const d of DIMS) if (state[d].size) p.set(d, [...state[d]].join(','));
   if (state.dispute) p.set('dispute','1'); if (state.todo) p.set('todo','1');
   if (PERF.on) p.set('perf','1');
-  const qs = p.toString(); history.replaceState(null, '', (qs ? '?'+qs : location.pathname) + location.hash);
+  let hash = location.hash;
+  const target = hash ? document.getElementById(hash.slice(1)) : null;
+  // 用户改了条件，旧条目已不在结果里，就不能继续把它拼进分享地址。
+  // 首次载入先保留 hash，让 init 按已有规则处理别人发来的冲突深链接。
+  if (!preserveHash && target?.closest('[hidden]')){
+    hash = ''; spyLast = '';
+  }
+  const qs = p.toString(); history.replaceState(null, '', (qs ? '?'+qs : location.pathname) + hash);
 }
 function syncControls(){
   document.getElementById('q').value = state.q;
@@ -1226,7 +1232,7 @@ function renderCard(card, terms, key){
   f.details.open = terms.length > 0 && terms.some(t => e.src.toLowerCase().includes(t)) && !terms.some(t => inBody.includes(t));
   card.key = key;
 }
-function apply(){
+function apply({ preserveHash = false } = {}){
   const t0 = performance.now();
   const terms = state.q.toLowerCase().split(/\s+/).filter(Boolean);
   const key = terms.join(' ');
@@ -1261,7 +1267,7 @@ function apply(){
   for (const [n, sub] of TOC_SEC){ const none = !tocSec[n]; if (sub.lastElementChild.hidden === none) sub.lastElementChild.hidden = !none; }
   document.getElementById('cnt').textContent = shown;
   document.getElementById('empty').hidden = shown !== 0;
-  syncControls(); syncActiveFilters(); writeUrl(); tocSync(spyLast);
+  syncControls(); syncActiveFilters(); writeUrl({ preserveHash }); tocSync(spyLast);
   PERF.log('apply', t0, `命中 ${shown} 条，重渲染 ${rerender} 张`);
 }
 
@@ -1274,7 +1280,11 @@ function wire(){
   const toResults = () => {
     setMenu(false);
     const soft = !matchMedia('(prefers-reduced-motion: reduce)').matches;
-    requestAnimationFrame(() => document.getElementById('active-filters').scrollIntoView({block:'start', behavior:soft ? 'smooth' : 'auto'}));
+    requestAnimationFrame(() => {
+      const filters = document.getElementById('active-filters');
+      const target = filters.hidden ? document.getElementById('list') : filters;
+      target.scrollIntoView({block:'start', behavior:soft ? 'smooth' : 'auto'});
+    });
   };
   document.querySelectorAll('[data-dim]').forEach(g => g.addEventListener('click', ev => {
     const b = ev.target.closest('[data-v]'); if (!b) return;
@@ -1300,8 +1310,15 @@ function wire(){
   });
   document.getElementById('f-dispute').addEventListener('change', e => { state.dispute = e.target.checked; apply(); toResults(); });
   document.getElementById('f-todo').addEventListener('change', e => { state.todo = e.target.checked; apply(); toResults(); });
-  let tm; document.getElementById('q').addEventListener('input', e => {
-    clearTimeout(tm); tm = setTimeout(() => { state.q = e.target.value.trim(); apply(); }, 120);
+  const q = document.getElementById('q');
+  const search = () => { clearTimeout(tm); state.q = q.value.trim(); apply(); };
+  let tm; q.addEventListener('input', () => {
+    clearTimeout(tm); tm = setTimeout(search, 120);
+  });
+  q.addEventListener('keydown', e => {
+    // 中文输入法确认候选词的 Enter 不提交；提交时立即应用，不能等防抖。
+    if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
+    e.preventDefault(); search(); q.blur(); toResults();
   });
   const reset = () => { clearState(); apply(); toTop(); };
   document.getElementById('reset').addEventListener('click', reset);
@@ -1414,8 +1431,27 @@ function docPathOf(href){
 const DM = {
   mask: document.getElementById('doc-mask'), title: document.getElementById('dm-t'),
   gh: document.getElementById('dm-gh'), toc: document.getElementById('dm-toc'),
-  doc: document.getElementById('dm-doc'), heads: [], lastFocus: null
+  doc: document.getElementById('dm-doc'), heads: [], lastFocus: null, inertBefore: null
 };
+function dmSetBackgroundInert(on){
+  if (on){
+    if (DM.inertBefore) return;
+    DM.inertBefore = new Map();
+    for (const el of document.body.children){
+      // 引用浮层位于正文弹窗外，打开长文时仍须能操作它的“跳过去”。
+      if (el === DM.mask || el === POP) continue;
+      DM.inertBefore.set(el, el.inert); el.inert = true;
+    }
+  } else {
+    for (const [el, inert] of DM.inertBefore || []) el.inert = inert;
+    DM.inertBefore = null;
+  }
+}
+function dmFocusables(){
+  const roots = POP.hidden ? [DM.mask] : [DM.mask, POP];
+  return roots.flatMap(root => [...root.querySelectorAll('a[href],button,input,select,textarea,[tabindex]')])
+    .filter(el => el.tabIndex >= 0 && !el.disabled && !el.closest('[hidden],[inert]') && el.getClientRects().length);
+}
 function dmHref(u){
   if (/^(https?:|mailto:|#)/.test(u)) return u;
   return REPO_BLOB + u.replace(/^(\.\.?\/)+/, '').split('/').map(encodeURIComponent).join('/');
@@ -1515,6 +1551,7 @@ function dmClose(){
   DM.mask.hidden = true;
   POP.hidden = true;
   document.body.style.overflow = '';
+  dmSetBackgroundInert(false);
   DM.lastFocus?.focus?.({ preventScroll: true });   // 不然「跳过去」刚滚到目标，又被拽回原来那个链接
   DM.lastFocus = null;
 }
@@ -1522,6 +1559,7 @@ async function dmOpen(path, from){
   DM.lastFocus = from || null;
   DM.mask.hidden = false;
   document.body.style.overflow = 'hidden';
+  dmSetBackgroundInert(true);
   DM.gh.href = dmHref(path);
   DM.toc.textContent = ''; DM.heads = [];
   DM.title.textContent = decodeURIComponent(path.replace(/^docs\//, '').replace(/\.md$/, ''));
@@ -1569,9 +1607,22 @@ document.addEventListener('click', ev => {
 });
 document.getElementById('dm-x').addEventListener('click', dmClose);
 DM.mask.addEventListener('click', ev => { if (ev.target === DM.mask) dmClose(); });
+document.addEventListener('focusin', ev => {
+  if (DM.mask.hidden || DM.mask.contains(ev.target) || (!POP.hidden && POP.contains(ev.target))) return;
+  document.getElementById('dm-x').focus({ preventScroll: true });
+});
 // Esc 先关引用浮层，再按一次才关长文弹窗
 document.addEventListener('keydown', ev => {
-  if (ev.key !== 'Escape' || DM.mask.hidden) return;
+  if (DM.mask.hidden) return;
+  if (ev.key === 'Tab'){
+    const targets = dmFocusables(), at = targets.indexOf(document.activeElement);
+    if (ev.shiftKey ? at <= 0 : at < 0 || at === targets.length - 1){
+      ev.preventDefault();
+      (ev.shiftKey ? targets[targets.length - 1] : targets[0])?.focus();
+    }
+    return;
+  }
+  if (ev.key !== 'Escape') return;
   ev.stopPropagation();
   if (!POP.hidden){ POP.hidden = true; return; }
   dmClose();
@@ -1625,16 +1676,14 @@ document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !TIP.hid
     PERF.log('解析正文', t1, files.length + ' 个文件');
     status.remove();
     const t2 = performance.now(); build(sections); PERF.log('建 DOM', t2, CARDS.length + ' 张卡');
-    buildGlossary(); readUrl(); wire(); apply();
+    buildGlossary(); readUrl(); wire(); apply({ preserveHash: true });
     PERF.mark(`DOM 节点 ${document.getElementsByTagName('*').length}，术语 ${GLOSS.length}`);
     if (location.hash){
       let target = document.getElementById(location.hash.slice(1));
       // 别人分享过来的地址可能带着和 hash 冲突的筛选（老版本拼出来的 ?sec=8#e-11-1），
       // 这时按 hash 办：点链接就是要看那一条，筛选清掉。
       if (target && !target.offsetParent){
-        state.q = ''; for (const d of DIMS) state[d].clear();
-        state.dispute = false; state.todo = false;
-        syncControls(); apply(); writeUrl();
+        clearState(); apply();
       }
       // 落到一节的第一条时滚它所在的节块，节标题跟着进视野——和点「见第 13 节」
       // 跳过去看到的是同一屏，地址栏也是同一个 #e-13-1
